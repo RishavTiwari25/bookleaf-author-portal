@@ -1,5 +1,6 @@
 # Render Blueprint: one Node web service (API + built React app) and one Postgres database.
-# Deploy: Render dashboard -> New -> Blueprint -> pick this repo. Then set ANTHROPIC_API_KEY (optional).
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo. Then set GEMINI_API_KEY (free tier)
+# or ANTHROPIC_API_KEY in the dashboard. Both optional: with neither the app runs in fallback mode.
 databases:
   - name: bookleaf-db
     plan: free
@@ -27,6 +28,12 @@ services:
           property: connectionString
       - key: JWT_SECRET
         generateValue: true
+      - key: AI_PROVIDER
+        value: auto # gemini if GEMINI_API_KEY is set, else anthropic, else fallback
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: GEMINI_API_KEY
+        sync: false # set in the dashboard; free-tier key from aistudio.google.com
       - key: AI_MODEL
         value: claude-haiku-5-5
       - key: ANTHROPIC_API_KEY
