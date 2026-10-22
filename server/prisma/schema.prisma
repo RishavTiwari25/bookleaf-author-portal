@@ -1,0 +1,157 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  AUTHOR
+  ADMIN
+}
+
+/// Order matters: Postgres sorts enums by declaration order,
+/// so ORDER BY priority puts CRITICAL first.
+enum Priority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketCategory {
+  ROYALTY_PAYMENTS
+  ISBN_METADATA
+  PRINTING_QUALITY
+  DISTRIBUTION_AVAILABILITY
+  BOOK_STATUS_PRODUCTION
+  GENERAL_INQUIRY
+}
+
+/// Who decided a category, priority or draft: the model, the keyword fallback, or a human.
+enum AiSource {
+  AI
+  FALLBACK
+  MANUAL
+}
+
+enum MessageKind {
+  RESPONSE      // visible to the author
+  INTERNAL_NOTE // admins only
+}
+
+/// A login. Authors have a linked Author profile, admins don't.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role
+  author       Author?
+  createdAt    DateTime @default(now())
+
+  assignedTickets Ticket[]        @relation("TicketAssignee")
+  messages        TicketMessage[]
+}
+
+/// Author profile, keyed by the author_id from BookLeaf's data (e.g. AUTH001).
+model Author {
+  id         String   @id
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id])
+  phone      String?
+  city       String?
+  joinedDate DateTime
+
+  books   Book[]
+  tickets Ticket[]
+}
+
+/// Money is stored as whole rupees (Int) because the source data has no paise.
+model Book {
+  id                    String    @id @default(cuid())
+  /// BookLeaf's own book id from the dataset, e.g. BK001
+  bookCode              String    @unique
+  authorId              String
+  author                Author    @relation(fields: [authorId], references: [id])
+  title                 String
+  isbn                  String    @unique
+  genre                 String
+  publicationDate       DateTime?
+  status                String
+  mrp                   Int?
+  royaltyPerCopy        Int?
+  totalCopiesSold       Int       @default(0)
+  totalRoyaltyEarned    Int       @default(0)
+  royaltyPaid           Int       @default(0)
+  royaltyPending        Int       @default(0)
+  lastRoyaltyPayoutDate DateTime?
+  printPartner          String?
+  availableOn           String[]
+
+  tickets Ticket[]
+
+  @@index([authorId])
+}
+
+model Ticket {
+  id          Int      @id @default(autoincrement())
+  authorId    String
+  author      Author   @relation(fields: [authorId], references: [id])
+  /// null means "General / Account Level"
+  bookId      String?
+  book        Book?    @relation(fields: [bookId], references: [id])
+  subject     String
+  description String
+  /// The brief asks for attachment UI only, so we keep just the file name.
+  attachmentName String?
+
+  status         TicketStatus   @default(OPEN)
+  category       TicketCategory
+  categorySource AiSource
+  priority       Priority
+  prioritySource AiSource
+  aiReasoning    String?
+
+  assigneeId String?
+  assignee   User?   @relation("TicketAssignee", fields: [assigneeId], references: [id])
+
+  /// Cached AI (or template) draft so we don't pay for it every time the ticket is opened.
+  draftBody      String?
+  draftSource    AiSource?
+  draftModel     String?
+  draftCreatedAt DateTime?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  resolvedAt DateTime?
+
+  messages TicketMessage[]
+
+  @@index([status, priority, createdAt])
+  @@index([authorId])
+}
+
+model TicketMessage {
+  id        Int         @id @default(autoincrement())
+  ticketId  Int
+  ticket    Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderId  String
+  sender    User        @relation(fields: [senderId], references: [id])
+  kind      MessageKind
+  body      String
+  /// true when an admin sent the AI draft (edited or not), useful to measure draft quality
+  usedDraft Boolean     @default(false)
+  createdAt DateTime    @default(now())
+
+  @@index([ticketId])
+}
