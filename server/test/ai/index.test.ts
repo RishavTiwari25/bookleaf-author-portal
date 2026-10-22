@@ -3,14 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Replace the network layer so no test ever calls the real API.
 vi.mock('../../src/ai/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/ai/client')>();
-  return { ...actual, callClaude: vi.fn() };
+  return { ...actual, callModel: vi.fn() };
 });
 
-import { callClaude } from '../../src/ai/client';
+import { callModel } from '../../src/ai/client';
 import { _clearAiCaches, aiStatus, classifyTicket, draftResponse, isUsableDraft, parseClassification } from '../../src/ai';
 import { ticket } from './fixtures';
 
-const mockedCall = vi.mocked(callClaude);
+const mockedCall = vi.mocked(callModel);
 const reply = (text: string, stopReason: string | null = 'end_turn') => ({
   text,
   stopReason,

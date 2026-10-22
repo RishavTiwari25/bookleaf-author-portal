@@ -9,8 +9,10 @@ export default defineConfig({
       // The API tests below never reach the database (auth/validation reject first),
       // but Prisma needs a syntactically valid URL to construct its client.
       DATABASE_URL: process.env.DATABASE_URL ?? 'postgresql://user:pass@localhost:5432/test',
-      // Force fallback mode so tests never call the real API.
+      // Force fallback mode so tests never call a real API.
       ANTHROPIC_API_KEY: '',
+      GEMINI_API_KEY: '',
+      AI_PROVIDER: 'auto',
     },
   },
 });

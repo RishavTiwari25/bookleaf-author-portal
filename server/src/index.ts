@@ -8,7 +8,7 @@ const app = createApp();
 const server = app.listen(config.PORT, () => {
   const ai = aiStatus();
   console.log(`BookLeaf portal listening on http://localhost:${config.PORT}`);
-  console.log(ai.enabled ? `AI enabled (model: ${ai.model})` : 'AI disabled: running in keyword fallback mode');
+  console.log(ai.enabled ? `AI enabled (provider: ${ai.provider}, model: ${ai.model})` : 'AI disabled: running in keyword fallback mode');
 });
 
 // Close the DB pool cleanly when Render (or Ctrl+C) stops the process.

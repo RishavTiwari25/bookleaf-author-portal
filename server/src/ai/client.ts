@@ -1,141 +1,57 @@
-// Thin wrapper around the Anthropic SDK: lazy client, timeout, one retry, token/cost logging.
+// Provider selection. index.ts talks to this file only; the SDK-specific code lives in providers/.
+//
+//   AI_PROVIDER=gemini     -> Gemini, needs GEMINI_API_KEY
+//   AI_PROVIDER=anthropic  -> Claude, needs ANTHROPIC_API_KEY
+//   AI_PROVIDER=auto       -> (default) Gemini if GEMINI_API_KEY is set, else Claude if
+//                             ANTHROPIC_API_KEY is set, else no provider = FALLBACK mode.
 
-import Anthropic from '@anthropic-ai/sdk';
+import { anthropicModel, callAnthropic, describeAnthropicError } from './providers/anthropic';
+import { callGemini, describeGeminiError, geminiModel } from './providers/gemini';
+import type { AiRequest, AiResult } from './providers/shared';
 
-const DEFAULT_MODEL = 'claude-haiku-5-5';
-const DEFAULT_TIMEOUT_MS = 15_000;
-const RETRY_BACKOFF_MS = 800;
+export type { AiRequest, AiResult } from './providers/shared';
 
-// USD per million tokens (input, output). Used only for the log line's cost estimate.
-const PRICING: Record<string, { input: number; output: number }> = {
-  'claude-haiku-5-5': { input: 0.1, output: 0.5 },
-  'claude-haiku-4-5': { input: 1, output: 5 },
-  'claude-sonnet-5-5': { input: 2, output: 10 },
-  'claude-opus-5-5': { input: 4, output: 20 },
-};
+export type AiProvider = 'gemini' | 'anthropic';
+
+const hasKey = (name: string): boolean => Boolean(process.env[name]?.trim());
 
 // Env is read on each call (not at import) so tests and late dotenv loading both work.
-export function aiModel(): string {
-  return process.env.AI_MODEL?.trim() || DEFAULT_MODEL;
+export function aiProvider(): AiProvider | null {
+  const preference = (process.env.AI_PROVIDER ?? 'auto').trim().toLowerCase();
+  const gemini = hasKey('GEMINI_API_KEY');
+  const anthropic = hasKey('ANTHROPIC_API_KEY');
+
+  if (preference === 'gemini') return gemini ? 'gemini' : null;
+  if (preference === 'anthropic') return anthropic ? 'anthropic' : null;
+  if (preference !== 'auto') console.warn(`[ai] unknown AI_PROVIDER "${preference}", treating it as auto`);
+  if (gemini) return 'gemini';
+  if (anthropic) return 'anthropic';
+  return null;
 }
 
 export function aiEnabled(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+  return aiProvider() !== null;
 }
 
-function timeoutMs(): number {
-  const n = Number(process.env.AI_TIMEOUT_MS);
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_TIMEOUT_MS;
+/** The model the selected provider will use, or null in FALLBACK mode. */
+export function aiModel(): string | null {
+  const provider = aiProvider();
+  if (provider === 'gemini') return geminiModel();
+  if (provider === 'anthropic') return anthropicModel();
+  return null;
 }
 
-let client: Anthropic | null = null;
-let clientKey: string | null = null;
-
-/** Created on first use, and only when a key exists. Never constructed in FALLBACK mode. */
-function getClient(): Anthropic | null {
-  const key = process.env.ANTHROPIC_API_KEY?.trim();
-  if (!key) return null;
-  if (!client || clientKey !== key) {
-    // maxRetries: 0 because we do our own single retry below and want to control timing.
-    client = new Anthropic({ apiKey: key, maxRetries: 0 });
-    clientKey = key;
-  }
-  return client;
-}
-
-export interface ClaudeRequest {
-  purpose: 'classify' | 'draft';
-  system: string;
-  userMessage: string;
-  maxTokens: number;
-}
-
-export interface ClaudeResult {
-  text: string;
-  model: string;
-  stopReason: string | null;
-  inputTokens: number;
-  outputTokens: number;
-}
-
-/** Retry only what is likely to succeed a second later: rate limits and server errors. */
-function isRetryable(err: unknown): boolean {
-  if (err instanceof Anthropic.APIConnectionTimeoutError || err instanceof Anthropic.APIUserAbortError) return false;
-  if (err instanceof Anthropic.APIConnectionError) return true;
-  if (err instanceof Anthropic.APIError) {
-    const status = err.status ?? 0;
-    return status === 429 || status >= 500;
-  }
-  return false;
-}
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * Model-specific request knobs. Classification and short drafts don't need extended thinking:
- * on Haiku we switch it off so every output token goes into the answer. Models that refuse
- * "disabled" (Opus/Sonnet 5.5) get the lowest effort instead.
- */
-function thinkingParams(model: string): Partial<Anthropic.MessageCreateParamsNonStreaming> {
-  if (model.startsWith('claude-haiku')) return { thinking: { type: 'disabled' } };
-  return { output_config: { effort: 'low' } };
-}
-
-function logUsage(purpose: string, model: string, input: number, output: number, ms: number): void {
-  const price = PRICING[model];
-  const cost = price ? `$${((input * price.input + output * price.output) / 1_000_000).toFixed(6)}` : 'n/a';
-  console.info(`[ai] ${purpose} model=${model} in=${input} out=${output} cost~${cost} ${ms}ms`);
-}
-
-/** Calls Claude once (plus one retry on 429/5xx). Throws on failure; index.ts catches and falls back. */
-export async function callClaude(req: ClaudeRequest): Promise<ClaudeResult> {
-  const anthropic = getClient();
-  if (!anthropic) throw new Error('AI disabled: ANTHROPIC_API_KEY is not set');
-  const model = aiModel();
-
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs());
-    const started = Date.now();
-    try {
-      const response = await anthropic.messages.create(
-        {
-          model,
-          max_tokens: req.maxTokens,
-          system: req.system,
-          messages: [{ role: 'user', content: req.userMessage }],
-          ...thinkingParams(model),
-        },
-        { signal: controller.signal },
-      );
-
-      if (response.stop_reason === 'refusal') throw new Error('Model declined the request');
-      const text = response.content
-        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-        .map((block) => block.text)
-        .join('')
-        .trim();
-
-      const { input_tokens, output_tokens } = response.usage;
-      logUsage(req.purpose, model, input_tokens, output_tokens, Date.now() - started);
-      return { text, model, stopReason: response.stop_reason, inputTokens: input_tokens, outputTokens: output_tokens };
-    } catch (err) {
-      if (attempt === 1 && isRetryable(err)) {
-        console.warn(`[ai] ${req.purpose} attempt 1 failed (${describeError(err)}), retrying once`);
-        await sleep(RETRY_BACKOFF_MS);
-        continue;
-      }
-      throw err;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  // Unreachable: the loop either returns or throws.
-  throw new Error('callClaude: exhausted attempts');
+/** One entry point for both call shapes (classify -> JSON, draft -> text). Throws on failure. */
+export async function callModel(req: AiRequest): Promise<AiResult> {
+  const provider = aiProvider();
+  if (provider === 'gemini') return callGemini(req);
+  if (provider === 'anthropic') return callAnthropic(req);
+  throw new Error('AI disabled: no API key configured');
 }
 
 export function describeError(err: unknown): string {
-  if (err instanceof Anthropic.APIError) return `${err.status ?? 'network'} ${err.message}`;
+  const fromSdk = describeAnthropicError(err) ?? describeGeminiError(err);
+  if (fromSdk) return fromSdk;
   if (err instanceof Error) return err.message;
   return String(err);
 }

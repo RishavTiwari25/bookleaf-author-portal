@@ -192,7 +192,7 @@ paths:
           description: OK
           content:
             application/json:
-              example: { ok: true, ai: { enabled: false, model: claude-haiku-5-5 } }
+              example: { ok: true, ai: { enabled: true, provider: gemini, model: gemini-3.5-flash-lite } }
 
   /auth/login:
     post:

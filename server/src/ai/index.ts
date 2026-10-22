@@ -1,7 +1,8 @@
-// Public AI module. Everything exported here NEVER throws: if Claude is off, slow, failing or
-// returns something unusable, we fall back to the keyword classifier / template drafts.
+// Public AI module. Everything exported here NEVER throws: if the model (Gemini or Claude) is
+// off, slow, failing or returns something unusable, we fall back to the keyword classifier /
+// template drafts.
 
-import { aiEnabled, aiModel, callClaude, describeError } from './client';
+import { aiEnabled, aiModel, aiProvider, callModel, describeError } from './client';
 import { cacheKey, TtlLruCache } from './cache';
 import { fallbackClassify, fallbackDraft } from './fallback';
 import { buildClassifyUserMessage, buildDraftSystemPrompt, buildDraftUserMessage, CLASSIFY_SYSTEM_PROMPT, MAX_THREAD_MESSAGES } from './prompts';
@@ -18,8 +19,16 @@ const DRAFT_MAX_TOKENS = 500;
 const classificationCache = new TtlLruCache<Classification>(500);
 const draftCache = new TtlLruCache<Draft>(200);
 
-export function aiStatus(): { enabled: boolean; model: string } {
-  return { enabled: aiEnabled(), model: aiModel() };
+export interface AiStatus {
+  enabled: boolean;
+  /** Which SDK answers calls; 'none' means fallback mode. */
+  provider: 'gemini' | 'anthropic' | 'none';
+  /** The model in use, or null in fallback mode. */
+  model: string | null;
+}
+
+export function aiStatus(): AiStatus {
+  return { enabled: aiEnabled(), provider: aiProvider() ?? 'none', model: aiModel() };
 }
 
 // ---------------------------------------------------------------------------
@@ -86,11 +95,11 @@ export async function classifyTicket(ctx: TicketContext): Promise<Classification
   try {
     if (!aiEnabled()) return fallbackClassify(ctx);
 
-    const key = cacheKey('classify', aiModel(), ctx.ticketId ?? null, ctx.subject, ctx.description);
+    const key = cacheKey('classify', aiProvider(), aiModel(), ctx.ticketId ?? null, ctx.subject, ctx.description);
     const cached = classificationCache.get(key);
     if (cached) return cached;
 
-    const result = await callClaude({
+    const result = await callModel({
       purpose: 'classify',
       system: CLASSIFY_SYSTEM_PROMPT,
       userMessage: buildClassifyUserMessage(ctx),
@@ -115,13 +124,13 @@ export async function draftResponse(ctx: DraftContext & { regenerate?: boolean }
     if (!aiEnabled()) return { body: fallbackDraft(ctx), source: 'FALLBACK' };
 
     const recentThread = (ctx.thread ?? []).slice(-MAX_THREAD_MESSAGES);
-    const key = cacheKey('draft', aiModel(), ctx.ticketId ?? null, ctx.subject, ctx.description, ctx.category, ctx.priority, recentThread, ctx.book ?? null);
+    const key = cacheKey('draft', aiProvider(), aiModel(), ctx.ticketId ?? null, ctx.subject, ctx.description, ctx.category, ctx.priority, recentThread, ctx.book ?? null);
     if (!ctx.regenerate) {
       const cached = draftCache.get(key);
       if (cached) return cached;
     }
 
-    const result = await callClaude({
+    const result = await callModel({
       purpose: 'draft',
       system: buildDraftSystemPrompt(ctx),
       userMessage: buildDraftUserMessage(ctx),
