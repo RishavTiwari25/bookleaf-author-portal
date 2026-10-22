@@ -5,7 +5,7 @@ A support portal for BookLeaf Publishing with two sides:
 - **Author portal**: authors log in, see their books with sales and royalty numbers, raise queries about a book (or their account), and follow their tickets. Replies from the support team show up live, without a refresh.
 - **Admin portal**: the support team works one queue across all authors. Every ticket is auto-classified (category + priority), the urgent and oldest ones are easy to spot, and opening a ticket gives a suggested reply grounded in BookLeaf's policies and that author's real book data. The admin edits it, sends it, and the author sees it instantly.
 
-**Live demo:** `<add Render URL here>` · **API docs:** `<live URL>/api/docs`
+**Live demo:** https://bookleaf-author-portal-f9ag.onrender.com · **API docs:** https://bookleaf-author-portal-f9ag.onrender.com/api/docs
 
 ## Test logins
 
