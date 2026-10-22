@@ -33,9 +33,9 @@ export interface Draft { body: string; source: 'AI' | 'FALLBACK'; model?: string
 export function classifyTicket(ctx: TicketContext): Promise<Classification>;          // never throws; falls back to heuristics
 export function draftResponse(ctx: TicketContext & { category: Category; priority: Priority;
   thread?: { from: 'AUTHOR' | 'ADMIN'; body: string }[] }): Promise<Draft>;           // never throws; fallback = category template
-export function aiStatus(): { enabled: boolean; model: string };
+export function aiStatus(): { enabled: boolean; provider: 'gemini' | 'anthropic' | 'none'; model: string | null };
 ```
-Category/Priority types are string unions matching the enums above (export them from `server/src/ai/types.ts`). Env: `ANTHROPIC_API_KEY` (optional), `AI_MODEL` (default `claude-haiku-5-5`), `AI_TIMEOUT_MS` (default 15000). Without a key, everything still works in FALLBACK mode.
+Category/Priority types are string unions matching the enums above (export them from `server/src/ai/types.ts`). Env: `AI_PROVIDER` (`auto` | `gemini` | `anthropic`, default `auto`), `GEMINI_API_KEY` + `GEMINI_MODEL` (default `gemini-3.5-flash-lite`), `ANTHROPIC_API_KEY` + `AI_MODEL` (default `claude-haiku-5-5`), `AI_TIMEOUT_MS` (default 15000). Without any key, everything still works in FALLBACK mode.
 
 ## REST API (base `/api`, JSON, auth = `Authorization: Bearer <jwt>`)
 Errors always come back as `{ "error": { "code": "VALIDATION_ERROR"|"UNAUTHORIZED"|"FORBIDDEN"|"NOT_FOUND"|"CONFLICT"|"INTERNAL", "message": string, "details"?: any } }` with the matching 400/401/403/404/409/500 status.

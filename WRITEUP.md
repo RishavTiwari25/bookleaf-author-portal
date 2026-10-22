@@ -14,7 +14,7 @@
 - **SSE instead of WebSockets.** Updates only go server → client. SSE is a plain HTTP response, works through Render's proxy, and the client keeps 30 s polling as a safety net. The cost: `EventSource` can't send headers, so the JWT goes in the query string. That's acceptable for a demo, and I'd use a short-lived stream token in production.
 - **Classify before saving, not in a background job.** The author waits for one short call (15 s timeout, one retry on 429/5xx), but the queue never shows an unclassified ticket and there's no job system to run. At BookLeaf's volume (1,200+ books/month) a queue worker would be the next step.
 - **In-memory event bus and in-memory queue sort.** Both are simple and easy to read, and correct for one instance and hundreds of tickets. Neither scales horizontally. I documented both instead of adding Redis for a take-home.
-- **Haiku over a bigger model.** Both tasks are short and well-specified. Haiku 5.5 handles them at about $0.0002 per draft, and switching models is a one-line env change if quality needs it.
+- **A small model over a bigger one, and two providers behind one interface.** Both tasks are short and well-specified. The live demo runs on Gemini 3.5 Flash-Lite's free tier; Claude Haiku 5.5 (about $0.0002 per draft) is the alternative. The prompts, parser, cache and fallback are shared, so switching provider or model is an env change, not a code change.
 - **Attachments are UI-only** (we store the file name), as the brief allowed. I spent that time on edge cases instead: books still in production with no MRP, authors who've never been paid, and "General / Account Level" queries with no book.
 
 ## How I'd evolve this for production
