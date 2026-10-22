@@ -1,5 +1,5 @@
 import type { Prisma, Priority, TicketCategory, TicketStatus } from '@prisma/client';
-import { classifyTicket, draftResponse, type Classification } from '../ai';
+import { aiStatus, classifyTicket, draftResponse, type Classification } from '../ai';
 import { prisma } from '../db';
 import { AppError, notFound } from '../lib/errors';
 import type { AuthUser } from '../middleware/auth';
@@ -245,7 +245,9 @@ export async function assignToMe(user: AuthUser, ticketId: number) {
 export async function getDraft(ticketId: number, regenerate: boolean) {
   const ticket = await loadTicket({ id: ticketId });
 
-  if (ticket.draftBody && !regenerate) {
+  // A template draft saved while the AI was down is worth retrying once the AI is available.
+  const staleFallback = ticket.draftSource === 'FALLBACK' && aiStatus().enabled;
+  if (ticket.draftBody && !regenerate && !staleFallback) {
     return {
       body: ticket.draftBody,
       source: ticket.draftSource,
@@ -264,6 +266,7 @@ export async function getDraft(ticketId: number, regenerate: boolean) {
     category: ticket.category,
     priority: ticket.priority,
     thread,
+    regenerate, // skip the AI module's in-memory cache too
   });
 
   const saved = await prisma.ticket.update({
